@@ -16,7 +16,7 @@
 
     <!-- html2canvas Library for capturing elements -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <!-- Direct QR Canvas Generator Library -->
+    <!-- Direct QR Generator Library -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
     <style>
@@ -128,7 +128,7 @@
         
         .qr-section { margin-top: 25px; border-top: 1px solid #cccccc; padding-top: 20px; display: flex; flex-direction: column; align-items: center; }
         .qr-section p { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); margin-bottom: 12px; margin-top: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .qr-canvas { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; background: #fff; box-sizing: border-box; }
+        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
 
         .footer { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--card-bg); padding: 16px; box-sizing: border-box; border-top: 2px solid var(--text-main); z-index: 20; }
         .btn-submit { font-family: 'Montserrat', sans-serif; width: 100%; max-width: 600px; margin: 0 auto; display: block; background-color: var(--highlight); color: var(--highlight-text); padding: 18px; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; transition: 0.2s; cursor: pointer; }
@@ -258,9 +258,9 @@
                     <div id="invoice-report-list"></div>
                 </div>
 
-                <!-- Direct QR Canvas Section -->
+                <!-- Direct Embedded QR Image Section -->
                 <div class="qr-section">
-                    <canvas id="vietqr-canvas" class="qr-canvas" width="220" height="220"></canvas>
+                    <img id="vietqr-img" class="qr-image" src="" alt="Payment QR Code">
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -740,8 +740,8 @@
         const consumerInfo = tlv("38", guid + beneficiary + serviceCode);
 
         const payloadFormat = tlv("00", "01");
-        const pointOfInitiation = tlv("01", "12"); // 12: QR động có số tiền
-        const currency = tlv("53", "704"); // 704: VND
+        const pointOfInitiation = tlv("01", "12");
+        const currency = tlv("53", "704");
         const amountField = amountVND > 0 ? tlv("54", String(Math.round(amountVND))) : "";
         const country = tlv("58", "VN");
         const additionalData = cleanNote ? tlv("62", tlv("08", cleanNote)) : "";
@@ -759,29 +759,41 @@
         return rawWithoutCrc + crc16Ccitt(rawWithoutCrc);
     }
 
-    function renderDirectQrCanvas(customerName, totalSum) {
-        const canvas = document.getElementById("vietqr-canvas");
-        const qrContent = buildVietQrPayload(
-            "0004100022246002",
-            totalSum,
-            `${customerName} thanh toan ca phe`
-        );
+    // Vẽ QR lên canvas ẩn rồi chuyển sang data:image/png gắn vào <img id="vietqr-img">
+    function renderEmbeddedQrImage(customerName, totalSum) {
+        return new Promise((resolve) => {
+            const imgEl = document.getElementById("vietqr-img");
+            const qrContent = buildVietQrPayload(
+                "0004100022246002",
+                totalSum,
+                `${customerName} thanh toan ca phe`
+            );
 
-        if (window.QRCode && typeof window.QRCode.toCanvas === "function") {
-            window.QRCode.toCanvas(canvas, qrContent, {
-                width: 204,
-                margin: 1,
-                color: {
-                    dark: "#000000",
-                    light: "#ffffff"
-                }
-            }, (err) => {
-                if (err) showToast("Cannot render QR code directly.");
-            });
-        }
+            const tempCanvas = document.createElement("canvas");
+            if (window.QRCode && typeof window.QRCode.toCanvas === "function") {
+                window.QRCode.toCanvas(tempCanvas, qrContent, {
+                    width: 220,
+                    margin: 1,
+                    color: {
+                        dark: "#000000",
+                        light: "#ffffff"
+                    }
+                }, (err) => {
+                    if (err) {
+                        showToast("Cannot render QR code directly.");
+                        return resolve(false);
+                    }
+                    imgEl.onload = () => resolve(true);
+                    imgEl.onerror = () => resolve(false);
+                    imgEl.src = tempCanvas.toDataURL("image/png");
+                });
+            } else {
+                resolve(false);
+            }
+        });
     }
 
-    function renderInvoiceBox(customerName, start, end, records) {
+    async function renderInvoiceBox(customerName, start, end, records) {
         document.getElementById('bill-cust-name').innerText = customerName;
         
         const startFormatted = formatEnglishDateWithoutYear(start.split("-").reverse().join("/"));
@@ -803,7 +815,7 @@
         html += `<div class="invoice-total">TOTAL: <span style="color:var(--success);">${totalSum.toLocaleString('vi-VN')} VND</span></div>`;
         document.getElementById('invoice-report-list').innerHTML = html;
 
-        renderDirectQrCanvas(customerName, totalSum);
+        await renderEmbeddedQrImage(customerName, totalSum);
         document.getElementById('invoice-container-box').style.display = "block";
     }
 
@@ -811,13 +823,30 @@
         document.getElementById('invoice-container-box').style.display = "none";
     }
 
-    function exportInvoiceToImage() {
+    function nextFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+
+    async function exportInvoiceToImage() {
         const target = document.getElementById("invoice-capture-area");
+        const imgEl = document.getElementById("vietqr-img");
+        const customerName = document.getElementById('invoice-customer-select').value;
         showToast("Generating image file, please wait...");
 
-        html2canvas(target, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
+        if (!imgEl.src || !imgEl.src.startsWith("data:image/png")) {
+            const totalText = document.querySelector(".invoice-total")?.innerText || "";
+            const digits = parseInt(totalText.replace(/[^\d]/g, ""), 10) || 0;
+            await renderEmbeddedQrImage(customerName, digits);
+        }
+
+        await nextFrame();
+
+        html2canvas(target, {
+            scale: 2,
+            backgroundColor: "#ffffff",
+            logging: false
+        }).then(canvas => {
             const imageURI = canvas.toDataURL("image/png");
-            const customerName = document.getElementById('invoice-customer-select').value;
             
             const downloadLink = document.createElement("a");
             downloadLink.href = imageURI;
@@ -828,7 +857,7 @@
             document.body.removeChild(downloadLink);
             
             showToast("Image saved successfully! 🎉");
-        }).catch(err => {
+        }).catch(() => {
             showToast("Failed to generate image. Please take a manual screenshot.");
         });
     }
@@ -839,3 +868,4 @@
 
 </body>
 </html>
+```[cite: 1]
