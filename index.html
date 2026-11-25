@@ -126,7 +126,7 @@
         
         .qr-section { margin-top: 25px; border-top: 1px solid #cccccc; padding-top: 20px; display: flex; flex-direction: column; align-items: center; }
         .qr-section p { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); margin-bottom: 12px; margin-top: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .qr-image { width: 230px; height: 230px; border: 1px solid var(--border-color); border-radius: 8px; padding: 5px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
+        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 5px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
 
         .footer { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--card-bg); padding: 16px; box-sizing: border-box; border-top: 2px solid var(--text-main); z-index: 20; }
         .btn-submit { font-family: 'Montserrat', sans-serif; width: 100%; max-width: 600px; margin: 0 auto; display: block; background-color: var(--highlight); color: var(--highlight-text); padding: 18px; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; transition: 0.2s; cursor: pointer; }
@@ -256,9 +256,9 @@
                     <div id="invoice-report-list"></div>
                 </div>
 
-                <!-- Dynamic VietQR with Pre-filled Amount -->
+                <!-- Embedded QR Image from Google Drive -->
                 <div class="qr-section">
-                    <img id="vietqr-img" class="qr-image" crossorigin="anonymous" referrerpolicy="no-referrer" src="" alt="Payment QR Code">
+                    <img id="vietqr-img" class="qr-image" referrerpolicy="no-referrer" src="https://lh3.googleusercontent.com/d/1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr=w1000" onerror="this.onerror=null;this.src='https://drive.google.com/thumbnail?id=1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr&sz=w1000';" alt="Payment QR Code">
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -285,6 +285,8 @@
 
 <script>
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwusW-aXDoL4gyuywmnZxeTsPHswvKenOY4uC0GhityagFJdIyFwxmM5eeJjTg-HX6gLw/exec";
+    const DRIVE_QR_PRIMARY_URL = "https://lh3.googleusercontent.com/d/1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr=w1000";
+    const DRIVE_QR_THUMBNAIL_URL = "https://drive.google.com/thumbnail?id=1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr&sz=w1000";
 
     const menuData = [
         { id: "iced", name: "Iced Coffee", price: "$12" },
@@ -307,8 +309,8 @@
 
     let sales = {};
     menuData.forEach(item => sales[item.id] = 0);
-    let selectedCustomers = [];
-    let latestQrDataUrl = "";
+    let selectedCustomers = []; 
+    let cachedQrDataUrl = "";
 
     let toastTimeout;
     function showToast(message) {
@@ -319,6 +321,52 @@
         toastTimeout = setTimeout(() => {
             toast.className = "";
         }, 3000);
+    }
+
+    async function preloadDriveQrAsDataUrl() {
+        if (cachedQrDataUrl) return cachedQrDataUrl;
+
+        const candidates = [
+            DRIVE_QR_PRIMARY_URL,
+            DRIVE_QR_THUMBNAIL_URL,
+            `https://corsproxy.io/?${encodeURIComponent(DRIVE_QR_PRIMARY_URL)}`
+        ];
+
+        for (const url of candidates) {
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.referrerPolicy = "no-referrer";
+                    img.onload = () => {
+                        try {
+                            const c = document.createElement("canvas");
+                            c.width = img.naturalWidth || 500;
+                            c.height = img.naturalHeight || 500;
+                            const ctx = c.getContext("2d");
+                            ctx.fillStyle = "#ffffff";
+                            ctx.fillRect(0, 0, c.width, c.height);
+                            ctx.drawImage(img, 0, 0, c.width, c.height);
+                            resolve(c.toDataURL("image/png"));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    };
+                    img.onerror = reject;
+                    img.src = url;
+                });
+
+                if (dataUrl && dataUrl.startsWith("data:image/png")) {
+                    cachedQrDataUrl = dataUrl;
+                    const imgEl = document.getElementById("vietqr-img");
+                    if (imgEl) imgEl.src = cachedQrDataUrl;
+                    return cachedQrDataUrl;
+                }
+            } catch (e) {
+                // Thử nguồn tiếp theo nếu bị chặn CORS
+            }
+        }
+        return "";
     }
 
     function updateDisplayDateText(dateStr) {
@@ -689,14 +737,14 @@
             });
             const result = await response.json();
             if (result.success && result.data && result.data.length > 0) {
-                await renderInvoiceBox(customerName, startDate, endDate, result.data);
+                renderInvoiceBox(customerName, startDate, endDate, result.data);
             } else {
                 showToast(`No records found for ${customerName} within selected period.`);
                 hideInvoiceBox();
             }
         } catch (e) {
             showToast("Offline simulation mode active...");
-            await renderInvoiceBox(customerName, startDate, endDate, [
+            renderInvoiceBox(customerName, startDate, endDate, [
                 { date: "01/07/2026", amount: 120000 },
                 { date: "02/07/2026", amount: 120000 },
                 { date: "03/07/2026", amount: 120000 },
@@ -707,47 +755,7 @@
         }
     }
 
-    function buildVietQrAmountUrl(customerName, totalSum) {
-        const BANK_ID = "OCB";
-        const ACCOUNT_NO = "0004100022246002";
-        const TEMPLATE = "compact2";
-        const ACCOUNT_NAME = encodeURIComponent("LE DINH KHANH");
-        const cleanAddInfo = `${customerName} thanh toan ca phe`
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-zA-Z0-9 ]/g, " ")
-            .trim();
-        const DESCRIPTION = encodeURIComponent(cleanAddInfo);
-        const amountParam = Math.max(0, Math.round(Number(totalSum) || 0));
-
-        return `https://img.vietqr.io/image/${BANK_ID}-${ACCOUNT_NO}-${TEMPLATE}.png?amount=${amountParam}&addInfo=${DESCRIPTION}&accountName=${ACCOUNT_NAME}`;
-    }
-
-    function convertUrlToDataUrl(url) {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.referrerPolicy = "no-referrer";
-            img.onload = () => {
-                try {
-                    const c = document.createElement("canvas");
-                    c.width = img.naturalWidth || 400;
-                    c.height = img.naturalHeight || 400;
-                    const ctx = c.getContext("2d");
-                    ctx.fillStyle = "#ffffff";
-                    ctx.fillRect(0, 0, c.width, c.height);
-                    ctx.drawImage(img, 0, 0, c.width, c.height);
-                    resolve(c.toDataURL("image/png"));
-                } catch (e) {
-                    resolve("");
-                }
-            };
-            img.onerror = () => resolve("");
-            img.src = url;
-        });
-    }
-
-    async function renderInvoiceBox(customerName, start, end, records) {
+    function renderInvoiceBox(customerName, start, end, records) {
         document.getElementById('bill-cust-name').innerText = customerName;
         
         const startFormatted = formatEnglishDateWithoutYear(start.split("-").reverse().join("/"));
@@ -769,15 +777,9 @@
         html += `<div class="invoice-total">TOTAL: <span style="color:var(--success);">${totalSum.toLocaleString('vi-VN')} VND</span></div>`;
         document.getElementById('invoice-report-list').innerHTML = html;
 
-        const qrUrl = buildVietQrAmountUrl(customerName, totalSum);
         const imgEl = document.getElementById("vietqr-img");
-        imgEl.src = qrUrl;
+        imgEl.src = cachedQrDataUrl || DRIVE_QR_PRIMARY_URL;
         document.getElementById('invoice-container-box').style.display = "block";
-
-        latestQrDataUrl = await convertUrlToDataUrl(qrUrl);
-        if (latestQrDataUrl) {
-            imgEl.src = latestQrDataUrl;
-        }
     }
 
     function hideInvoiceBox() {
@@ -790,14 +792,9 @@
         const customerName = document.getElementById('invoice-customer-select').value;
         showToast("Generating image file, please wait...");
 
-        if (latestQrDataUrl) {
-            imgEl.src = latestQrDataUrl;
-        } else if (imgEl.src && !imgEl.src.startsWith("data:")) {
-            const converted = await convertUrlToDataUrl(imgEl.src);
-            if (converted) {
-                latestQrDataUrl = converted;
-                imgEl.src = converted;
-            }
+        const dataUrl = await preloadDriveQrAsDataUrl();
+        if (dataUrl) {
+            imgEl.src = dataUrl;
         }
 
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -826,6 +823,7 @@
 
     loadLocalState();
     renderMenu();
+    preloadDriveQrAsDataUrl();
 </script>
 
 </body>
