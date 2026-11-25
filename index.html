@@ -16,8 +16,6 @@
 
     <!-- html2canvas Library for capturing elements -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <!-- QRCode generator for rendering EMVCo VietQR payload directly -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <style>
         :root {
@@ -128,7 +126,7 @@
         
         .qr-section { margin-top: 25px; border-top: 1px solid #cccccc; padding-top: 20px; display: flex; flex-direction: column; align-items: center; }
         .qr-section p { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); margin-bottom: 12px; margin-top: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 6px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
+        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 5px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
 
         .footer { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--card-bg); padding: 16px; box-sizing: border-box; border-top: 2px solid var(--text-main); z-index: 20; }
         .btn-submit { font-family: 'Montserrat', sans-serif; width: 100%; max-width: 600px; margin: 0 auto; display: block; background-color: var(--highlight); color: var(--highlight-text); padding: 18px; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; transition: 0.2s; cursor: pointer; }
@@ -258,9 +256,9 @@
                     <div id="invoice-report-list"></div>
                 </div>
 
-                <!-- Self-generated EMVCo VietQR Image -->
+                <!-- Embedded QR Image from Google Drive -->
                 <div class="qr-section">
-                    <img id="vietqr-img" class="qr-image" src="" alt="Payment QR Code">
+                    <img id="vietqr-img" class="qr-image" referrerpolicy="no-referrer" src="https://lh3.googleusercontent.com/d/1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr=w1000" onerror="this.onerror=null;this.src='https://drive.google.com/thumbnail?id=1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr&sz=w1000';" alt="Payment QR Code">
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -287,8 +285,8 @@
 
 <script>
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwusW-aXDoL4gyuywmnZxeTsPHswvKenOY4uC0GhityagFJdIyFwxmM5eeJjTg-HX6gLw/exec";
-    const OCB_BIN = "970448";
-    const OCB_ACCOUNT = "0004100022246002";
+    const DRIVE_QR_PRIMARY_URL = "https://lh3.googleusercontent.com/d/1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr=w1000";
+    const DRIVE_QR_THUMBNAIL_URL = "https://drive.google.com/thumbnail?id=1a3ezKYy3NoXKWxrnljyBg5ywbk804pDr&sz=w1000";
 
     const menuData = [
         { id: "iced", name: "Iced Coffee", price: "$12" },
@@ -311,8 +309,8 @@
 
     let sales = {};
     menuData.forEach(item => sales[item.id] = 0);
-    let selectedCustomers = [];
-    let currentInvoiceAmount = 0;
+    let selectedCustomers = []; 
+    let cachedQrDataUrl = "";
 
     let toastTimeout;
     function showToast(message) {
@@ -323,6 +321,52 @@
         toastTimeout = setTimeout(() => {
             toast.className = "";
         }, 3000);
+    }
+
+    async function preloadDriveQrAsDataUrl() {
+        if (cachedQrDataUrl) return cachedQrDataUrl;
+
+        const candidates = [
+            DRIVE_QR_PRIMARY_URL,
+            DRIVE_QR_THUMBNAIL_URL,
+            `https://corsproxy.io/?${encodeURIComponent(DRIVE_QR_PRIMARY_URL)}`
+        ];
+
+        for (const url of candidates) {
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.referrerPolicy = "no-referrer";
+                    img.onload = () => {
+                        try {
+                            const c = document.createElement("canvas");
+                            c.width = img.naturalWidth || 500;
+                            c.height = img.naturalHeight || 500;
+                            const ctx = c.getContext("2d");
+                            ctx.fillStyle = "#ffffff";
+                            ctx.fillRect(0, 0, c.width, c.height);
+                            ctx.drawImage(img, 0, 0, c.width, c.height);
+                            resolve(c.toDataURL("image/png"));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    };
+                    img.onerror = reject;
+                    img.src = url;
+                });
+
+                if (dataUrl && dataUrl.startsWith("data:image/png")) {
+                    cachedQrDataUrl = dataUrl;
+                    const imgEl = document.getElementById("vietqr-img");
+                    if (imgEl) imgEl.src = cachedQrDataUrl;
+                    return cachedQrDataUrl;
+                }
+            } catch (e) {
+                // Thử nguồn tiếp theo nếu bị chặn CORS
+            }
+        }
+        return "";
     }
 
     function updateDisplayDateText(dateStr) {
@@ -711,104 +755,6 @@
         }
     }
 
-    // EMVCo / VietQR TLV + CRC-16/CCITT-FALSE payload builder
-    function emvTlv(id, val) {
-        const strVal = String(val);
-        const len = String(strVal.length).padStart(2, "0");
-        return `${id}${len}${strVal}`;
-    }
-
-    function crc16CcittFalse(payload) {
-        let crc = 0xFFFF;
-        for (let i = 0; i < payload.length; i++) {
-            crc ^= payload.charCodeAt(i) << 8;
-            for (let bit = 0; bit < 8; bit++) {
-                if ((crc & 0x8000) !== 0) {
-                    crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
-                } else {
-                    crc = (crc << 1) & 0xFFFF;
-                }
-            }
-        }
-        return crc.toString(16).toUpperCase().padStart(4, "0");
-    }
-
-    function sanitizeVietQrNote(text) {
-        return String(text || "")
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/đ/g, "d")
-            .replace(/Đ/g, "D")
-            .replace(/[^a-zA-Z0-9 ]/g, " ")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 25);
-    }
-
-    function buildEmvVietQrString(bankBin, accountNo, amountVnd, addInfo) {
-        const cleanAmount = Math.max(0, Math.round(Number(amountVnd) || 0));
-        const cleanNote = sanitizeVietQrNote(addInfo);
-
-        const guid = emvTlv("00", "A000000727");
-        const beneficiary = emvTlv("01", emvTlv("00", bankBin) + emvTlv("01", String(accountNo).trim()));
-        const serviceCode = emvTlv("02", "QRIBFTTA");
-        const consumerAccountInfo = emvTlv("38", guid + beneficiary + serviceCode);
-
-        const payloadFormat = emvTlv("00", "01");
-        const pointOfInitiation = emvTlv("01", cleanAmount > 0 ? "12" : "11");
-        const transactionCurrency = emvTlv("53", "704");
-        const transactionAmount = cleanAmount > 0 ? emvTlv("54", String(cleanAmount)) : "";
-        const countryCode = emvTlv("58", "VN");
-        const additionalDataField = cleanNote ? emvTlv("62", emvTlv("08", cleanNote)) : "";
-
-        const withoutCrc =
-            payloadFormat +
-            pointOfInitiation +
-            consumerAccountInfo +
-            transactionCurrency +
-            transactionAmount +
-            countryCode +
-            additionalDataField +
-            "6304";
-
-        return withoutCrc + crc16CcittFalse(withoutCrc);
-    }
-
-    function renderQrToImage(customerName, totalSum) {
-        const imgEl = document.getElementById("vietqr-img");
-        const qrString = buildEmvVietQrString(
-            OCB_BIN,
-            OCB_ACCOUNT,
-            totalSum,
-            `${customerName} thanh toan ca phe`
-        );
-
-        const tempContainer = document.createElement("div");
-        tempContainer.style.position = "fixed";
-        tempContainer.style.left = "-9999px";
-        document.body.appendChild(tempContainer);
-
-        try {
-            new QRCode(tempContainer, {
-                text: qrString,
-                width: 220,
-                height: 220,
-                correctLevel: QRCode.CorrectLevel.M
-            });
-
-            const canvas = tempContainer.querySelector("canvas");
-            const generatedImg = tempContainer.querySelector("img");
-
-            if (canvas) {
-                imgEl.src = canvas.toDataURL("image/png");
-            } else if (generatedImg && generatedImg.src) {
-                imgEl.src = generatedImg.src;
-            }
-        } finally {
-            document.body.removeChild(tempContainer);
-        }
-    }
-
     function renderInvoiceBox(customerName, start, end, records) {
         document.getElementById('bill-cust-name').innerText = customerName;
         
@@ -828,11 +774,11 @@
                      </div>`;
         });
 
-        currentInvoiceAmount = totalSum;
         html += `<div class="invoice-total">TOTAL: <span style="color:var(--success);">${totalSum.toLocaleString('vi-VN')} VND</span></div>`;
         document.getElementById('invoice-report-list').innerHTML = html;
 
-        renderQrToImage(customerName, totalSum);
+        const imgEl = document.getElementById("vietqr-img");
+        imgEl.src = cachedQrDataUrl || DRIVE_QR_PRIMARY_URL;
         document.getElementById('invoice-container-box').style.display = "block";
     }
 
@@ -840,40 +786,44 @@
         document.getElementById('invoice-container-box').style.display = "none";
     }
 
-    function exportInvoiceToImage() {
+    async function exportInvoiceToImage() {
         const target = document.getElementById("invoice-capture-area");
         const imgEl = document.getElementById("vietqr-img");
         const customerName = document.getElementById('invoice-customer-select').value;
         showToast("Generating image file, please wait...");
 
-        if (!imgEl.src || !imgEl.src.startsWith("data:image/")) {
-            renderQrToImage(customerName, currentInvoiceAmount);
+        const dataUrl = await preloadDriveQrAsDataUrl();
+        if (dataUrl) {
+            imgEl.src = dataUrl;
         }
 
-        requestAnimationFrame(() => {
-            html2canvas(target, {
-                scale: 2,
-                backgroundColor: "#ffffff"
-            }).then(canvas => {
-                const imageURI = canvas.toDataURL("image/png");
-                
-                const downloadLink = document.createElement("a");
-                downloadLink.href = imageURI;
-                downloadLink.download = `Invoice_SAI_GON_DEN_DA_${customerName}.png`;
-                
-                document.body.appendChild(downloadLink);
-                downloadLink.click();
-                document.body.removeChild(downloadLink);
-                
-                showToast("Image saved successfully!");
-            }).catch(() => {
-                showToast("Failed to generate image. Please take a manual screenshot.");
-            });
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        html2canvas(target, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: "#ffffff"
+        }).then(canvas => {
+            const imageURI = canvas.toDataURL("image/png");
+            
+            const downloadLink = document.createElement("a");
+            downloadLink.href = imageURI;
+            downloadLink.download = `Invoice_SAI_GON_DEN_DA_${customerName}.png`;
+            
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            
+            showToast("Image saved successfully!");
+        }).catch(() => {
+            showToast("Failed to generate image. Please take a manual screenshot.");
         });
     }
 
     loadLocalState();
     renderMenu();
+    preloadDriveQrAsDataUrl();
 </script>
 
 </body>
