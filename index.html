@@ -16,6 +16,8 @@
 
     <!-- html2canvas Library for capturing elements -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Direct QR Canvas Generator Library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
     <style>
         :root {
@@ -126,7 +128,7 @@
         
         .qr-section { margin-top: 25px; border-top: 1px solid #cccccc; padding-top: 20px; display: flex; flex-direction: column; align-items: center; }
         .qr-section p { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); margin-bottom: 12px; margin-top: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 5px; background: #fff; }
+        .qr-canvas { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; background: #fff; box-sizing: border-box; }
 
         .footer { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--card-bg); padding: 16px; box-sizing: border-box; border-top: 2px solid var(--text-main); z-index: 20; }
         .btn-submit { font-family: 'Montserrat', sans-serif; width: 100%; max-width: 600px; margin: 0 auto; display: block; background-color: var(--highlight); color: var(--highlight-text); padding: 18px; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; transition: 0.2s; cursor: pointer; }
@@ -256,9 +258,9 @@
                     <div id="invoice-report-list"></div>
                 </div>
 
-                <!-- VietQR Auto-Generator Section -->
+                <!-- Direct QR Canvas Section -->
                 <div class="qr-section">
-                    <img id="vietqr-img" class="qr-image" src="" alt="Payment QR Code">
+                    <canvas id="vietqr-canvas" class="qr-canvas" width="220" height="220"></canvas>
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -579,7 +581,6 @@
         let dateObj = new Date(year, month, day);
         if(isNaN(dateObj)) return dateStr;
 
-        // Chỉ giữ lại tháng và ngày (bỏ thứ)
         const options = { month: 'short', day: 'numeric' };
         return dateObj.toLocaleDateString('en-US', options);
     }
@@ -697,13 +698,86 @@
         } catch (e) {
             showToast("Offline simulation mode active...");
             renderInvoiceBox(customerName, startDate, endDate, [
-                { date: "01/07/2026", amount: 12000 },
-                { date: "02/07/2026", amount: 12000 },
-                { date: "03/07/2026", amount: 12000 },
-                { date: "14/07/2026", amount: 15000 }
+                { date: "01/07/2026", amount: 120000 },
+                { date: "02/07/2026", amount: 120000 },
+                { date: "03/07/2026", amount: 120000 },
+                { date: "14/07/2026", amount: 150000 }
             ]);
         } finally {
             btn.innerText = "GENERATE INVOICE"; btn.disabled = false;
+        }
+    }
+
+    // Tạo chuỗi QR chuẩn EMVCo / VietQR (NAPAS) cho ngân hàng OCB (BIN: 970448)
+    function crc16Ccitt(str) {
+        let crc = 0xFFFF;
+        for (let i = 0; i < str.length; i++) {
+            crc ^= str.charCodeAt(i) << 8;
+            for (let j = 0; j < 8; j++) {
+                crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+            }
+        }
+        return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, "0");
+    }
+
+    function tlv(id, value) {
+        const len = String(value.length).padStart(2, "0");
+        return `${id}${len}${value}`;
+    }
+
+    function buildVietQrPayload(accountNo, amountVND, addInfo) {
+        const OCB_BIN = "970448";
+        const cleanNote = addInfo
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9 ]/g, " ")
+            .trim()
+            .slice(0, 25);
+
+        const guid = tlv("00", "A000000727");
+        const beneficiary = tlv("01", tlv("00", OCB_BIN) + tlv("01", String(accountNo).trim()));
+        const serviceCode = tlv("02", "QRIBFTTA");
+        const consumerInfo = tlv("38", guid + beneficiary + serviceCode);
+
+        const payloadFormat = tlv("00", "01");
+        const pointOfInitiation = tlv("01", "12"); // 12: QR động có số tiền
+        const currency = tlv("53", "704"); // 704: VND
+        const amountField = amountVND > 0 ? tlv("54", String(Math.round(amountVND))) : "";
+        const country = tlv("58", "VN");
+        const additionalData = cleanNote ? tlv("62", tlv("08", cleanNote)) : "";
+
+        const rawWithoutCrc =
+            payloadFormat +
+            pointOfInitiation +
+            consumerInfo +
+            currency +
+            amountField +
+            country +
+            additionalData +
+            "6304";
+
+        return rawWithoutCrc + crc16Ccitt(rawWithoutCrc);
+    }
+
+    function renderDirectQrCanvas(customerName, totalSum) {
+        const canvas = document.getElementById("vietqr-canvas");
+        const qrContent = buildVietQrPayload(
+            "0004100022246002",
+            totalSum,
+            `${customerName} thanh toan ca phe`
+        );
+
+        if (window.QRCode && typeof window.QRCode.toCanvas === "function") {
+            window.QRCode.toCanvas(canvas, qrContent, {
+                width: 204,
+                margin: 1,
+                color: {
+                    dark: "#000000",
+                    light: "#ffffff"
+                }
+            }, (err) => {
+                if (err) showToast("Cannot render QR code directly.");
+            });
         }
     }
 
@@ -729,16 +803,7 @@
         html += `<div class="invoice-total">TOTAL: <span style="color:var(--success);">${totalSum.toLocaleString('vi-VN')} VND</span></div>`;
         document.getElementById('invoice-report-list').innerHTML = html;
 
-        const BANK_ID = "OCB"; 
-        const ACCOUNT_NO = "0004100022246002";
-        const TEMPLATE = "compact2"; 
-        const DESCRIPTION = encodeURIComponent(`${customerName} thanh toan ca phe`);
-        
-        const qrUrl = `https://api.vietqr.io/image/${BANK_ID}-${ACCOUNT_NO}-${TEMPLATE}.png?amount=${totalSum}&addInfo=${DESCRIPTION}`;
-        
-        const imgElement = document.getElementById("vietqr-img");
-        imgElement.src = qrUrl;
-
+        renderDirectQrCanvas(customerName, totalSum);
         document.getElementById('invoice-container-box').style.display = "block";
     }
 
@@ -750,7 +815,7 @@
         const target = document.getElementById("invoice-capture-area");
         showToast("Generating image file, please wait...");
 
-        html2canvas(target, { scale: 2, useCORS: true, backgroundColor: "#ffffff" }).then(canvas => {
+        html2canvas(target, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
             const imageURI = canvas.toDataURL("image/png");
             const customerName = document.getElementById('invoice-customer-select').value;
             
