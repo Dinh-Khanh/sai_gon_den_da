@@ -258,7 +258,7 @@
 
                 <!-- Embedded QR Image from Google Drive -->
                 <div class="qr-section">
-                    <img id="vietqr-img" class="qr-image" referrerpolicy="no-referrer" src="https://drive.google.com/thumbnail?id=13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G&sz=w1000" alt="Payment QR Code">
+                    <img id="vietqr-img" class="qr-image" referrerpolicy="no-referrer" src="https://drive.google.com/thumbnail?id=18c6uUgKOG4WurGQuKee_aBmlAvanabCu&sz=w1000" alt="Payment QR Code">
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -285,8 +285,8 @@
 
 <script>
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwusW-aXDoL4gyuywmnZxeTsPHswvKenOY4uC0GhityagFJdIyFwxmM5eeJjTg-HX6gLw/exec";
-    const DRIVE_QR_URL = "https://drive.google.com/thumbnail?id=13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G&sz=w1000";
-    const DRIVE_QR_FALLBACK_URL = "https://lh3.googleusercontent.com/d/13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G=w1000";
+    const DRIVE_QR_URL = "https://drive.google.com/thumbnail?id=18c6uUgKOG4WurGQuKee_aBmlAvanabCu&sz=w1000";
+    const DRIVE_QR_FALLBACK_URL = "https://lh3.googleusercontent.com/d/18c6uUgKOG4WurGQuKee_aBmlAvanabCu=w1000";
 
     const menuData = [
         { id: "iced", name: "Iced Coffee", price: "$12" },
@@ -323,7 +323,6 @@
         }, 3000);
     }
 
-    // Chuyển ảnh QR từ Google Drive sang DataURL nội bộ để html2canvas xuất ảnh luôn đầy đủ QR
     async function preloadDriveQrAsDataUrl() {
         if (cachedQrDataUrl) return cachedQrDataUrl;
 
@@ -816,7 +815,7 @@
             downloadLink.click();
             document.body.removeChild(downloadLink);
             
-            showToast("Image saved successfully!");
+            showToast("Image saved successfully! 🎉");
         }).catch(() => {
             showToast("Failed to generate image. Please take a manual screenshot.");
         });
