@@ -16,8 +16,6 @@
 
     <!-- html2canvas Library for capturing elements -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <!-- Direct QR Generator Library -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
     <style>
         :root {
@@ -128,7 +126,7 @@
         
         .qr-section { margin-top: 25px; border-top: 1px solid #cccccc; padding-top: 20px; display: flex; flex-direction: column; align-items: center; }
         .qr-section p { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); margin-bottom: 12px; margin-top: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
+        .qr-image { width: 220px; height: 220px; border: 1px solid var(--border-color); border-radius: 8px; padding: 5px; background: #fff; box-sizing: border-box; object-fit: contain; display: block; }
 
         .footer { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--card-bg); padding: 16px; box-sizing: border-box; border-top: 2px solid var(--text-main); z-index: 20; }
         .btn-submit { font-family: 'Montserrat', sans-serif; width: 100%; max-width: 600px; margin: 0 auto; display: block; background-color: var(--highlight); color: var(--highlight-text); padding: 18px; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; transition: 0.2s; cursor: pointer; }
@@ -258,9 +256,9 @@
                     <div id="invoice-report-list"></div>
                 </div>
 
-                <!-- Direct Embedded QR Image Section -->
+                <!-- Embedded QR Image from Google Drive -->
                 <div class="qr-section">
-                    <img id="vietqr-img" class="qr-image" src="" alt="Payment QR Code">
+                    <img id="vietqr-img" class="qr-image" referrerpolicy="no-referrer" src="https://drive.google.com/thumbnail?id=13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G&sz=w1000" alt="Payment QR Code">
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; font-weight: bold; line-height: 1.5;">
                         LE DINH KHANH - OCB<br>
                         0004100022246002
@@ -287,6 +285,8 @@
 
 <script>
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwusW-aXDoL4gyuywmnZxeTsPHswvKenOY4uC0GhityagFJdIyFwxmM5eeJjTg-HX6gLw/exec";
+    const DRIVE_QR_URL = "https://drive.google.com/thumbnail?id=13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G&sz=w1000";
+    const DRIVE_QR_FALLBACK_URL = "https://lh3.googleusercontent.com/d/13UcnbC1HEwH1SkSkpTVdn9OrfTse9y2G=w1000";
 
     const menuData = [
         { id: "iced", name: "Iced Coffee", price: "$12" },
@@ -310,6 +310,7 @@
     let sales = {};
     menuData.forEach(item => sales[item.id] = 0);
     let selectedCustomers = []; 
+    let cachedQrDataUrl = "";
 
     let toastTimeout;
     function showToast(message) {
@@ -320,6 +321,53 @@
         toastTimeout = setTimeout(() => {
             toast.className = "";
         }, 3000);
+    }
+
+    // Chuyển ảnh QR từ Google Drive sang DataURL nội bộ để html2canvas xuất ảnh luôn đầy đủ QR
+    async function preloadDriveQrAsDataUrl() {
+        if (cachedQrDataUrl) return cachedQrDataUrl;
+
+        const candidates = [
+            DRIVE_QR_FALLBACK_URL,
+            DRIVE_QR_URL,
+            `https://corsproxy.io/?${encodeURIComponent(DRIVE_QR_URL)}`
+        ];
+
+        for (const url of candidates) {
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.referrerPolicy = "no-referrer";
+                    img.onload = () => {
+                        try {
+                            const c = document.createElement("canvas");
+                            c.width = img.naturalWidth || 500;
+                            c.height = img.naturalHeight || 500;
+                            const ctx = c.getContext("2d");
+                            ctx.fillStyle = "#ffffff";
+                            ctx.fillRect(0, 0, c.width, c.height);
+                            ctx.drawImage(img, 0, 0, c.width, c.height);
+                            resolve(c.toDataURL("image/png"));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    };
+                    img.onerror = reject;
+                    img.src = url;
+                });
+
+                if (dataUrl && dataUrl.startsWith("data:image/png")) {
+                    cachedQrDataUrl = dataUrl;
+                    const imgEl = document.getElementById("vietqr-img");
+                    if (imgEl) imgEl.src = cachedQrDataUrl;
+                    return cachedQrDataUrl;
+                }
+            } catch (e) {
+                // Thử nguồn tiếp theo nếu bị chặn CORS
+            }
+        }
+        return "";
     }
 
     function updateDisplayDateText(dateStr) {
@@ -708,92 +756,7 @@
         }
     }
 
-    // Tạo chuỗi QR chuẩn EMVCo / VietQR (NAPAS) cho ngân hàng OCB (BIN: 970448)
-    function crc16Ccitt(str) {
-        let crc = 0xFFFF;
-        for (let i = 0; i < str.length; i++) {
-            crc ^= str.charCodeAt(i) << 8;
-            for (let j = 0; j < 8; j++) {
-                crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
-            }
-        }
-        return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, "0");
-    }
-
-    function tlv(id, value) {
-        const len = String(value.length).padStart(2, "0");
-        return `${id}${len}${value}`;
-    }
-
-    function buildVietQrPayload(accountNo, amountVND, addInfo) {
-        const OCB_BIN = "970448";
-        const cleanNote = addInfo
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-zA-Z0-9 ]/g, " ")
-            .trim()
-            .slice(0, 25);
-
-        const guid = tlv("00", "A000000727");
-        const beneficiary = tlv("01", tlv("00", OCB_BIN) + tlv("01", String(accountNo).trim()));
-        const serviceCode = tlv("02", "QRIBFTTA");
-        const consumerInfo = tlv("38", guid + beneficiary + serviceCode);
-
-        const payloadFormat = tlv("00", "01");
-        const pointOfInitiation = tlv("01", "12");
-        const currency = tlv("53", "704");
-        const amountField = amountVND > 0 ? tlv("54", String(Math.round(amountVND))) : "";
-        const country = tlv("58", "VN");
-        const additionalData = cleanNote ? tlv("62", tlv("08", cleanNote)) : "";
-
-        const rawWithoutCrc =
-            payloadFormat +
-            pointOfInitiation +
-            consumerInfo +
-            currency +
-            amountField +
-            country +
-            additionalData +
-            "6304";
-
-        return rawWithoutCrc + crc16Ccitt(rawWithoutCrc);
-    }
-
-    // Vẽ QR lên canvas ẩn rồi chuyển sang data:image/png gắn vào <img id="vietqr-img">
-    function renderEmbeddedQrImage(customerName, totalSum) {
-        return new Promise((resolve) => {
-            const imgEl = document.getElementById("vietqr-img");
-            const qrContent = buildVietQrPayload(
-                "0004100022246002",
-                totalSum,
-                `${customerName} thanh toan ca phe`
-            );
-
-            const tempCanvas = document.createElement("canvas");
-            if (window.QRCode && typeof window.QRCode.toCanvas === "function") {
-                window.QRCode.toCanvas(tempCanvas, qrContent, {
-                    width: 220,
-                    margin: 1,
-                    color: {
-                        dark: "#000000",
-                        light: "#ffffff"
-                    }
-                }, (err) => {
-                    if (err) {
-                        showToast("Cannot render QR code directly.");
-                        return resolve(false);
-                    }
-                    imgEl.onload = () => resolve(true);
-                    imgEl.onerror = () => resolve(false);
-                    imgEl.src = tempCanvas.toDataURL("image/png");
-                });
-            } else {
-                resolve(false);
-            }
-        });
-    }
-
-    async function renderInvoiceBox(customerName, start, end, records) {
+    function renderInvoiceBox(customerName, start, end, records) {
         document.getElementById('bill-cust-name').innerText = customerName;
         
         const startFormatted = formatEnglishDateWithoutYear(start.split("-").reverse().join("/"));
@@ -815,16 +778,13 @@
         html += `<div class="invoice-total">TOTAL: <span style="color:var(--success);">${totalSum.toLocaleString('vi-VN')} VND</span></div>`;
         document.getElementById('invoice-report-list').innerHTML = html;
 
-        await renderEmbeddedQrImage(customerName, totalSum);
+        const imgEl = document.getElementById("vietqr-img");
+        imgEl.src = cachedQrDataUrl || DRIVE_QR_URL;
         document.getElementById('invoice-container-box').style.display = "block";
     }
 
     function hideInvoiceBox() {
         document.getElementById('invoice-container-box').style.display = "none";
-    }
-
-    function nextFrame() {
-        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     }
 
     async function exportInvoiceToImage() {
@@ -833,18 +793,18 @@
         const customerName = document.getElementById('invoice-customer-select').value;
         showToast("Generating image file, please wait...");
 
-        if (!imgEl.src || !imgEl.src.startsWith("data:image/png")) {
-            const totalText = document.querySelector(".invoice-total")?.innerText || "";
-            const digits = parseInt(totalText.replace(/[^\d]/g, ""), 10) || 0;
-            await renderEmbeddedQrImage(customerName, digits);
+        const dataUrl = await preloadDriveQrAsDataUrl();
+        if (dataUrl) {
+            imgEl.src = dataUrl;
         }
 
-        await nextFrame();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
         html2canvas(target, {
             scale: 2,
-            backgroundColor: "#ffffff",
-            logging: false
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: "#ffffff"
         }).then(canvas => {
             const imageURI = canvas.toDataURL("image/png");
             
@@ -856,7 +816,7 @@
             downloadLink.click();
             document.body.removeChild(downloadLink);
             
-            showToast("Image saved successfully! 🎉");
+            showToast("Image saved successfully!");
         }).catch(() => {
             showToast("Failed to generate image. Please take a manual screenshot.");
         });
@@ -864,8 +824,8 @@
 
     loadLocalState();
     renderMenu();
+    preloadDriveQrAsDataUrl();
 </script>
 
 </body>
 </html>
-```[cite: 1]
